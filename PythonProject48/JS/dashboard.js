@@ -101,8 +101,14 @@ function renderReviews(filter) {
   if (!container) return;
 
   let reviews = currentResult.reviews;
-  if (filter === 'pos') reviews = reviews.filter(r => r.sentiment === 'positive');
-  if (filter === 'neg') reviews = reviews.filter(r => r.sentiment === 'negative');
+
+  if (filter === 'pos') {
+    reviews = reviews.filter(r => r.sentiment === 'positive');
+  }
+
+  if (filter === 'neg') {
+    reviews = reviews.filter(r => r.sentiment === 'negative');
+  }
 
   if (!reviews.length) {
     container.innerHTML = '<div style="padding:20px;color:#6b6460;text-align:center">Bu filtrede yorum bulunamadı.</div>';
@@ -112,26 +118,51 @@ function renderReviews(filter) {
   container.innerHTML = reviews.map(r => {
     const emoji = r.sentiment === 'positive' ? '😊' : '😞';
     const text = r.text || '(Yorum metni yok)';
-    const date = r.tarih || r.date || r[Object.keys(r).find(k => k.toLowerCase().includes('tarih') || k.toLowerCase().includes('date')) || ''] || '';
-    const catTags = (r.categories || []).map(c => `<span class="cat-tag">${c}</span>`).join('');
-    const ratingBadge = r.puan !== null && r.puan !== undefined ? `<span class="badge badge--gold">★ ${r.puan}</span>` : '';
+    const date = r.tarih || r.date || r[Object.keys(r).find(k =>
+      k.toLowerCase().includes('tarih') || k.toLowerCase().includes('date')
+    ) || ''] || '';
+
+    const catTags = (r.categories || [])
+      .map(c => `<span class="cat-tag">${c}</span>`)
+      .join('');
+
+    const ratingBadge = r.puan !== null && r.puan !== undefined
+      ? `<span class="badge badge--gold">★ ${r.puan}</span>`
+      : '';
+
+    const overallScore = r.overallScore !== undefined && r.overallScore !== null
+      ? `<div class="overall-score">⭐ Genel Puan: ${r.overallScore}/10</div>`
+      : '';
+
+    const detailScores = r.categoryDetails && Object.keys(r.categoryDetails).length > 0
+      ? Object.entries(r.categoryDetails).map(([cat, detail]) => `
+          <div class="detail-box">
+            <strong>${cat}</strong> → ⭐ ${detail.score}/10
+            <br>
+            <small>${detail.reason}</small>
+          </div>
+        `).join('')
+      : '';
 
     return `
       <div class="review-item">
         <span class="review-item__emoji">${emoji}</span>
+
         <div class="review-item__body">
           <div class="review-item__text">${text}</div>
+
           <div class="review-item__meta">
             ${date ? `<span class="review-item__date">📅 ${date}</span>` : ''}
             ${ratingBadge}
             <div class="review-item__cats">${catTags}</div>
+            ${overallScore}
+            ${detailScores}
           </div>
         </div>
       </div>
     `;
   }).join('');
 }
-
 document.addEventListener('DOMContentLoaded', () => {
   init();
 
@@ -150,3 +181,4 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
+  

@@ -160,35 +160,74 @@ function calcCategoryScores(reviews) {
 
 function localAnalyzeData(cleanedData) {
   const { rows, commentCol, ratingCol, dateCol } = cleanedData;
+
   const reviews = rows.map(row => {
-    const text = commentCol ? row[commentCol] : null;
-    const cleanText = cleanRawText(text); // Ekrandaki gösterimi temizle
+    const text = commentCol ? row[commentCol] : "";
+    const cleanText = cleanRawText(text);
     const analysis = advancedClauseAnalyze(text);
+
     return {
       ...row,
-      [commentCol]: cleanText, // Tabloda düzgün görünmesi için temiz metni eşitle
+      [commentCol]: cleanText,
       text: cleanText,
       puan: ratingCol ? row[ratingCol] : null,
       sentiment: analysis.sentiment,
-      categories: analysis.categories,
-      catSentiments: analysis.catSentiments
+      overallScore: analysis.sentiment === 'positive' ? 8 : 3,
+
+categories: analysis.categories,
+
+catSentiments: analysis.catSentiments,
+
+categoryDetails: Object.fromEntries(
+  analysis.categories.map(cat => [
+    cat,
+    {
+      score: analysis.catSentiments[cat] === 'positive' ? 8 : 3,
+      sentiment: analysis.catSentiments[cat] || analysis.sentiment,
+      reason:
+        analysis.catSentiments[cat] === 'positive'
+          ? `${cat} açısından olumlu bir ifade tespit edildi.`
+          : `${cat} açısından olumsuz bir ifade tespit edildi.`,
+      evidence: cleanText.slice(0, 80)
+    }
+  ])
+)
     };
   });
 
+  const total = reviews.length;
+  const positiveCount = reviews.filter(r => r.sentiment === 'positive').length;
+  const negativeCount = total - positiveCount;
+  const ratings = reviews
+    .map(r => r.puan)
+    .filter(p => p !== null && p !== undefined && !isNaN(p));
+
   return {
     reviews,
-    stats: { total: reviews.length, positiveCount: reviews.filter(r => r.sentiment === 'positive').length, negativeCount: reviews.length - reviews.filter(r => r.sentiment === 'positive').length, positiveRate: reviews.length > 0 ? Math.round((reviews.filter(r => r.sentiment === 'positive').length / reviews.length) * 100) : 0, negativeRate: reviews.length > 0 ? Math.round(((reviews.length - reviews.filter(r => r.sentiment === 'positive').length) / reviews.length) * 100) : 0, avgRating: rows.map(r => r[ratingCol]).filter(p => p !== null && !isNaN(p)).length ? Math.round((rows.map(r => r[ratingCol]).filter(p => p !== null && !isNaN(p)).reduce((a, b) => a + b, 0) / rows.map(r => r[ratingCol]).filter(p => p !== null && !isNaN(p)).length) * 10) / 10 : null },
+    stats: {
+      total,
+      positiveCount,
+      negativeCount,
+      positiveRate: total > 0 ? Math.round((positiveCount / total) * 100) : 0,
+      negativeRate: total > 0 ? Math.round((negativeCount / total) * 100) : 0,
+      avgRating: ratings.length
+        ? Math.round((ratings.reduce((a, b) => Number(a) + Number(b), 0) / ratings.length) * 10) / 10
+        : null
+    },
     catScores: calcCategoryScores(reviews),
     wordFreq: getWordFrequency(reviews),
     trend: getTrendData(rows, dateCol, ratingCol)
   };
 }
-
 // --- ANA SUNUCU KÖPRÜSÜ ---
 async function analyzeData(cleanedData) {
+  console.log("ANALYZE DATA ÇALIŞTI", cleanedData);
+
   const { rows, commentCol, ratingCol, dateCol } = cleanedData;
 
   try {
+    console.log("FLASK API'YE İSTEK ATILIYOR...");
+
     const response = await fetch('http://127.0.0.1:5000/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -198,15 +237,17 @@ async function analyzeData(cleanedData) {
       })
     });
 
-    if (!response.ok) throw new Error();
+    if (!response.ok) {
+      throw new Error("Flask API hatası");
+    }
 
     const serverResponse = await response.json();
-    const geminiResult = serverResponse.data;
+    const geminiResult = serverResponse.data || [];
 
     const reviews = rows.map((row, index) => {
-      const text = commentCol ? row[commentCol] : null;
+      const text = commentCol ? row[commentCol] : "";
       const cleanText = cleanRawText(text);
-      const aiData = geminiResult.find(g => g.id === index);
+      const aiData = geminiResult.find(g => Number(g.id) === index);
       const localFallback = advancedClauseAnalyze(text);
 
       return {
@@ -215,26 +256,39 @@ async function analyzeData(cleanedData) {
         text: cleanText,
         puan: ratingCol ? row[ratingCol] : null,
         sentiment: aiData ? aiData.sentiment : localFallback.sentiment,
+        overallScore: aiData && aiData.overallScore !== undefined ? aiData.overallScore : null,
         categories: aiData ? aiData.categories : localFallback.categories,
-        catSentiments: aiData ? aiData.catSentiments : localFallback.catSentiments
+        catSentiments: aiData ? aiData.catSentiments : localFallback.catSentiments,
+        categoryDetails: aiData && aiData.categoryDetails ? aiData.categoryDetails : {}
       };
     });
 
     const total = reviews.length;
     const positiveCount = reviews.filter(r => r.sentiment === 'positive').length;
     const negativeCount = total - positiveCount;
-    const ratings = reviews.map(r => r.puan).filter(p => p !== null && !isNaN(p));
+    const ratings = reviews
+      .map(r => r.puan)
+      .filter(p => p !== null && p !== undefined && !isNaN(p));
 
     return {
       reviews,
-      stats: { total, positiveCount, negativeCount, positiveRate: total > 0 ? Math.round((positiveCount / total) * 100) : 0, negativeRate: total > 0 ? Math.round((negativeCount / total) * 100) : 0, avgRating: ratings.length ? Math.round((ratings.reduce((a, b) => a + b, 0) / ratings.length) * 10) / 10 : null },
+      stats: {
+        total,
+        positiveCount,
+        negativeCount,
+        positiveRate: total > 0 ? Math.round((positiveCount / total) * 100) : 0,
+        negativeRate: total > 0 ? Math.round((negativeCount / total) * 100) : 0,
+        avgRating: ratings.length
+          ? Math.round((ratings.reduce((a, b) => Number(a) + Number(b), 0) / ratings.length) * 10) / 10
+          : null
+      },
       catScores: calcCategoryScores(reviews),
       wordFreq: getWordFrequency(reviews),
       trend: getTrendData(rows, dateCol, ratingCol)
     };
 
   } catch (error) {
-    console.warn("Python sunucusuna bağlanılamadı, lokal akıllı filtre devrede.");
+    console.warn("Python sunucusuna bağlanılamadı, lokal akıllı filtre devrede.", error);
     return localAnalyzeData(cleanedData);
   }
 }
